@@ -1,5 +1,7 @@
 (ns chip8.core
-  (:require [clojure.java.io :refer [file input-stream]])
+  (:require [clojure.java.io :refer [file input-stream]]
+            [clojure.string :as str]
+            [clojure.core.match :refer [match]])
 ;  (:import [java.io File])
   )
 
@@ -45,16 +47,61 @@
   (:pc vm))
 
 (defn opcode [vm]
-  (bit-or (bit-shift-left (memory vm (pc vm))
-                          8)
-          (memory vm (inc (pc vm)))))
+  (map (partial memory vm)
+       (range (pc vm)
+              (+ 4 (pc vm)))))
 
 (defn increment-pc [vm]
-      (update-in vm :pc + 2))
+  (update-in vm [:pc] + 4))
 
 (defn process-opcode [vm opcode]
   :todo
   vm)
+
+(defn op-matcher [hex val form]
+  (let [mask (read-string
+              (str "0x"
+                   (-> (name hex)
+                       (str/replace #"[0-9a-f]" "f")
+                       (str/replace #"[^f]" "0"))))
+        expected (read-string
+                  (str "0x"
+                       (-> (name hex)
+                           (str/replace #"[^0-9a-f]" "0"))))
+        binding-mask (-> (name hex)
+                         (str/replace #"[0-9a-f]" "_"))
+        binding (reduce (fn [acc group]
+                          (let [sym (symbol (apply str (map first group)))
+                                mask' (apply + (map second group))
+                                trailing-zeros (Integer/numberOfTrailingZeros mask')
+                                masked (list 'bit-and mask' val)]
+                            (if (= (symbol "_") sym)
+                              acc
+                              (conj acc
+                                    (if (zero? trailing-zeros)
+                                      masked
+                                      (list 'bit-shift-right
+                                            masked
+                                            trailing-zeros))
+                                    sym))))
+                        '()
+                        (partition-by first (map (fn [c m] [c m])
+                                                 binding-mask
+                                                 [0xf000 0x0f00 0x00f0 0x000f])))]
+    (list
+     (list '= (list 'bit-and mask val) expected)
+     (list 'let (vec binding) form))))
+
+(defmacro op-case [op-var# & forms]
+  (let [else? (odd? (count forms))]
+    (loop [result (list 'cond)
+           forms' (partition 2 forms)]
+      (if (seq forms')
+        (let [[[hex form] & rest] forms']
+          (recur (concat result (op-matcher hex op-var# form)) rest))
+        (if else?
+          (concat result (list :else (last forms)))
+          result)))))
 
 
 (defn step [vm]
