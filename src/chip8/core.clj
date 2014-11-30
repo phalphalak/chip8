@@ -85,6 +85,39 @@
   {:pre [(pos? index) (< index (count (:memory vm)))]}
   (bit-and 0xff (get-in vm [:memory index])))
 
+(defn- width [vm]
+  (get-in vm [:display :width]))
+
+(defn- height [vm]
+  (get-in vm [:display :height]))
+
+(defn- valid-coords? [vm x y]
+  (and (< -1 x (width vm))
+       (< -1 y (height vm))))
+
+(defn- valid-pixel-index? [vm index]
+  (< -1 index (* (width vm)
+                 (height vm))))
+
+(defn- coords->index [vm x y]
+  {:pre [(valid-coords? vm x y)]
+   :post [(valid-pixel-index? vm %)]}
+  (+ x (* y (width vm))))
+
+(defn- index->coords [vm index]
+  {:pre [(valid-pixel-index? vm index)]
+   :post [(valid-coords? vm (first %) (second %))]}
+  [(mod index (width vm))
+   (quot index (width vm))])
+
+(defn- paint
+  "[vm collision?]"
+  [vm x y]
+  [(update-in vm [:display :pixels] not)
+   (get-in vm [:display :pixels])])
+
+(defn- paint-bytes [] :todo)
+
 (defn create-vm []
   (let [vm {:display {:width 64
                       :height 32
@@ -183,9 +216,11 @@
    :cxkk (-> (set-register vm x (random-byte kk))
              increment-pc)
    ;; DRW Vx, Vy, nibble
-   :dxyn (do (prn (format "pretend to draw %s-byte sprite at (V%s,V%s)" n x y))
-             ;; todo set VF to 1 if collision, 0 otherwise
-             (increment-pc vm))
+   :dxyn (let [reg-x (register vm x)
+               reg-y (register vm y)]
+           (do (prn (format "pretend to draw %s-byte sprite at (%s,%s)" n reg-y reg-y))
+               ;; todo set VF to 1 if collision, 0 otherwise
+               (increment-pc vm)))
    ;; else
    (error vm (format "unkown opcode 0x%x" opcode))))
 
