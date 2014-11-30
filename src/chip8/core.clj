@@ -1,62 +1,6 @@
 (ns chip8.core
   (:require [clojure.java.io :refer [file input-stream]]
-            [clojure.string :as str]
-            [clojure.core.match :refer [match]])
-;  (:import [java.io File])
-  )
-
-(defn file->bytes [f]
-  (with-open [bis (input-stream f)]
-    (let [length (.length (file f))
-          buffer (byte-array length)]
-      (.read bis buffer 0 length)
-      buffer)))
-
-
-(defn reset [vm]
-  ; memory to zero
-  )
-
-(defn create-vm []
-  {:display {:width 64
-             :height 32
-             :pixels (vec (boolean-array (* 64 32)))}
-   :error nil
-   :clock-speed 60 ;; hertz
-   :pc 0x200
-   ;; memory
-   ;;     0 - 0x200 : interpreter or font data in modern chip 8s
-   ;; 0xea0 - 0xeff : call stack
-   ;; 0xf00 - 0xfff : display refresh
-   :memory (vec (byte-array 0x1000))
-   :registers (vec (byte-array 16)) ;; a.k.a. V0 to VF (last one acts as a carry over)
-   :address-register (byte 0) ;; a.k.a. I
-   ;; timers run at 60 hertz
-   :timers {:delay 0
-            :sound 0}
-   :keyboard (vec (boolean-array 16))})
-
-#_(defn- set-memory [vm index byte]
-  (assoc-in vm [:memory index] byte))
-
-(defn memory [vm index]
-  {:pre [(pos? index) (< index (count (:memory vm)))]}
-  (bit-and 0xff (get-in vm [:memory index])))
-
-(defn pc [vm]
-  (:pc vm))
-
-(defn opcode [vm]
-  (map (partial memory vm)
-       (range (pc vm)
-              (+ 4 (pc vm)))))
-
-(defn increment-pc [vm]
-  (update-in vm [:pc] + 4))
-
-(defn process-opcode [vm opcode]
-  :todo
-  vm)
+            [clojure.string :as str]))
 
 (defn op-matcher [hex val form]
   (let [mask (read-string
@@ -103,11 +47,127 @@
           (concat result (list :else (last forms)))
           result)))))
 
+(defn file->bytes [f]
+  (with-open [bis (input-stream f)]
+    (let [length (.length (file f))
+          buffer (byte-array length)]
+      (.read bis buffer 0 length)
+      buffer)))
+
+
+(defn reset [vm]
+  ; memory to zero
+  )
+
+(defn create-vm []
+  {:display {:width 64
+             :height 32
+             :pixels (vec (boolean-array (* 64 32)))}
+   :error nil
+   :clock-speed 60 ;; hertz
+   :pc 0x200
+   ;; memory
+   ;;     0 - 0x200 : interpreter or font data in modern chip 8s
+   ;; 0xea0 - 0xeff : call stack
+   ;; 0xf00 - 0xfff : display refresh
+   :memory (vec (byte-array 0x1000))
+   :registers (vec (byte-array 16)) ;; a.k.a. V0 to VF (last one acts as a carry over)
+   :address-register (byte 0) ;; a.k.a. I
+   ;; timers run at 60 hertz
+   :timers {:delay 0
+            :sound 0}
+   :keyboard (vec (boolean-array 16))})
+
+#_(defn- set-memory [vm index byte]
+  (assoc-in vm [:memory index] byte))
+
+(defn memory [vm index]
+  {:pre [(pos? index) (< index (count (:memory vm)))]}
+  (bit-and 0xff (get-in vm [:memory index])))
+
+(defn pc [vm]
+  (:pc vm))
+
+(defn jump [vm addr]
+  (assoc vm :pc addr))
+
+(defn opcode [vm]
+  (+ (bit-shift-left (memory vm (pc vm)) 8)
+     (memory vm (inc (pc vm)))))
+
+(defn increment-pc [vm]
+  (update-in vm [:pc] + 2))
+
+(defn error
+  ([vm]
+   (:error vm))
+  ([vm message]
+   (assoc vm :error message)))
+
+(defn- byte->long [o]
+  (bit-and 0xff o))
+
+(defn- byte? [o]
+  (instance? Byte o))
+
+(defn- long? [o]
+  (instance? Long o))
+
+(defn- register [vm i]
+  {:pre [(long? i)]}
+  (get-in vm [:registers i]))
+
+(defn- set-register [vm i byte]
+  {:pre [(byte? byte)]}
+  (assoc-in vm [:registers i] byte))
+
+(defn- random-byte [mask]
+  (let [mask (if (byte? mask)
+               mask
+               (unchecked-byte mask))
+        bytes (byte-array 1)]
+    (.nextBytes (java.util.Random.) bytes)
+    (byte (bit-and (first bytes) mask))))
+
+(defn- add-bytes [b1 b2]
+  {:pre [(byte? b1) (byte? b2)]
+   :post (byte? (first %))}
+  (let [r (+ b1 b2)
+        c (<= Byte/MIN_VALUE r Byte/MAX_VALUE)]
+    [(unchecked-byte r) c]))
+
+(defn process-opcode [vm opcode]
+  (prn (Integer/toString opcode 16))
+  (op-case
+   opcode
+   ;; JP addr
+   :1nnn (jump vm nnn)
+   ;; SE Vx, byte
+   :3xkk (-> (if (= (register vm x)
+                    (unchecked-byte kk))
+               (increment-pc vm)
+               vm)
+             increment-pc)
+   ;; ADD Vx, byte
+   :7xkk (let [[val _] (add-bytes (register vm x) (unchecked-byte kk))]
+           (-> vm
+               (set-register x val)
+               increment-pc))
+   ;; LD I, addr
+   :annn (-> (assoc vm :address-register nnn)
+             increment-pc)
+   ;; RND Vx, byte
+   :cxkk (-> (set-register vm x (random-byte kk))
+             increment-pc)
+   ;; DRW Vx, Vy, nibble
+   :dxyn (do (prn (format "pretend to draw %s-byte sprite at (V%s,V%s)" n x y))
+             ;; todo set VF to 1 if collision, 0 otherwise
+             (increment-pc vm))
+   ;; else
+   (error vm (format "unkown opcode 0x%x" opcode))))
 
 (defn step [vm]
-  (-> vm
-      (process-opcode (opcode vm))
-      increment-pc))
+  (process-opcode vm (opcode vm)))
 
 (defn load-program [vm f]
   (let [bytes (vec (file->bytes f))
