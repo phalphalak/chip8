@@ -59,31 +59,54 @@
   ; memory to zero
   )
 
-(defn create-vm []
-  {:display {:width 64
-             :height 32
-             :pixels (vec (boolean-array (* 64 32)))}
-   :error nil
-   :clock-speed 60 ;; hertz
-   :pc 0x200
-   ;; memory
-   ;;     0 - 0x200 : interpreter or font data in modern chip 8s
-   ;; 0xea0 - 0xeff : call stack
-   ;; 0xf00 - 0xfff : display refresh
-   :memory (vec (byte-array 0x1000))
-   :registers (vec (byte-array 16)) ;; a.k.a. V0 to VF (last one acts as a carry over)
-   :address-register (byte 0) ;; a.k.a. I
-   ;; timers run at 60 hertz
-   :timers {:delay 0
-            :sound 0}
-   :keyboard (vec (boolean-array 16))})
+(def ^:private hex-chars (mapv unchecked-byte
+                               [0xF0, 0x90, 0x90, 0x90, 0xF0, ;; 0
+                                0x20, 0x60, 0x20, 0x20, 0x70, ;; 1
+                                0xF0, 0x10, 0xF0, 0x80, 0xF0, ;; 2
+                                0xF0, 0x10, 0xF0, 0x10, 0xF0, ;; 3
+                                0x90, 0x90, 0xF0, 0x10, 0x10, ;; 4
+                                0xF0, 0x80, 0xF0, 0x10, 0xF0, ;; 5
+                                0xF0, 0x80, 0xF0, 0x90, 0xF0, ;; 6
+                                0xF0, 0x10, 0x20, 0x40, 0x40, ;; 7
+                                0xF0, 0x90, 0xF0, 0x90, 0xF0, ;; 8
+                                0xF0, 0x90, 0xF0, 0x10, 0xF0, ;; 9
+                                0xF0, 0x90, 0xF0, 0x90, 0x90, ;; A
+                                0xE0, 0x90, 0xE0, 0x90, 0xE0, ;; B
+                                0xF0, 0x80, 0x80, 0x80, 0xF0, ;; C
+                                0xE0, 0x90, 0x90, 0x90, 0xE0, ;; D
+                                0xF0, 0x80, 0xF0, 0x80, 0xF0, ;; E
+                                0xF0, 0x80, 0xF0, 0x80, 0x80  ;; F
+                                ]))
 
-#_(defn- set-memory [vm index byte]
+(defn- set-memory [vm index byte]
   (assoc-in vm [:memory index] byte))
 
 (defn memory [vm index]
   {:pre [(pos? index) (< index (count (:memory vm)))]}
   (bit-and 0xff (get-in vm [:memory index])))
+
+(defn create-vm []
+  (let [vm {:display {:width 64
+                      :height 32
+                      :pixels (vec (boolean-array (* 64 32)))}
+            :error nil
+            :clock-speed 60 ;; hertz
+            :pc 0x200
+            ;; memory
+            ;;     0 - 0x200 : interpreter or font data in modern chip 8s
+            ;; 0xea0 - 0xeff : call stack
+            ;; 0xf00 - 0xfff : display refresh
+            :memory (vec (byte-array 0x1000))
+            :registers (vec (byte-array 16)) ;; a.k.a. V0 to VF (last one acts as a carry over)
+            :address-register (byte 0) ;; a.k.a. I
+            ;; timers run at 60 hertz
+            :timers {:delay 0
+                     :sound 0}
+            :keyboard (vec (boolean-array 16))}]
+    (reduce (fn [vm [i val]]
+              (set-memory vm i val))
+            vm
+            (map-indexed vector hex-chars))))
 
 (defn pc [vm]
   (:pc vm))
